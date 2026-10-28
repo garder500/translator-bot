@@ -45,6 +45,13 @@ docker build -t translator-bot .
 docker run -d --name translator-bot --restart unless-stopped --env-file .env translator-bot
 ```
 
+Une image multi-architecture (amd64/arm64) est publiée automatiquement sur GitHub Container Registry
+par la CI (`.github/workflows/ci.yml`) à chaque push sur `main` (`latest`) et à chaque tag `v*` :
+
+```bash
+docker run -d --restart unless-stopped --env-file .env ghcr.io/garder500/translator-bot:latest
+```
+
 ## Variables d'environnement
 
 | Variable | Défaut | Rôle |
