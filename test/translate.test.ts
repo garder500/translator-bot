@@ -54,3 +54,18 @@ describe("translate", () => {
     await expect(translate("Hello fail", "fr")).rejects.toThrow();
   });
 });
+
+describe("chunkText (cas Unicode)", () => {
+  test("ne coupe pas une paire surrogate", () => {
+    const text = "😀".repeat(300);
+    const chunks = chunkText(text, 101); // taille impaire : une coupe franche tomberait au milieu d'un emoji
+    expect(chunks.join("")).toBe(text);
+    for (const c of chunks) expect(c).not.toMatch(/[\ud800-\udbff]$|^[\udc00-\udfff]/);
+  });
+  test("coupe sur la ponctuation CJK", () => {
+    const text = "これは文です。".repeat(50);
+    const chunks = chunkText(text, 100);
+    expect(chunks.join("")).toBe(text);
+    expect(chunks.slice(0, -1).every((c) => c.endsWith("。"))).toBe(true);
+  });
+});

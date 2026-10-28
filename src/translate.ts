@@ -27,11 +27,16 @@ export function chunkText(text: string, max: number): string[] {
     if (cut < max * 0.5) {
       const sentence = Math.max(
         window.lastIndexOf(". "), window.lastIndexOf("! "), window.lastIndexOf("? "),
+        window.lastIndexOf("。") , window.lastIndexOf("！"), window.lastIndexOf("？"),
       );
       if (sentence >= max * 0.5) cut = sentence + 1;
     }
     if (cut < max * 0.5) cut = window.lastIndexOf(" ");
-    if (cut < max * 0.5) cut = max; // pas de séparateur raisonnable : coupe franche
+    if (cut < max * 0.5) {
+      cut = max; // pas de séparateur raisonnable : coupe franche
+      const prev = window.charCodeAt(cut - 1);
+      if (prev >= 0xd800 && prev <= 0xdbff) cut--; // ne pas couper une paire surrogate
+    }
     chunks.push(rest.slice(0, cut));
     rest = rest.slice(cut);
   }
@@ -65,7 +70,7 @@ const google: Provider = {
 /** MyMemory : secours gratuit et sans clé (quota journalier plus faible, 500 octets par requête). */
 const myMemory: Provider = {
   name: "MyMemory",
-  maxChunk: 400,
+  maxChunk: 120, // 500 octets max par requête : 120 caractères * 4 octets UTF-8 au pire
   async translate(text, target) {
     const lang = target === "iw" ? "he" : target;
     const params = new URLSearchParams({ q: text, langpair: `Autodetect|${lang}` });

@@ -64,9 +64,18 @@ function languageName(code: string): string {
 function extractText(message: Message): string {
   const parts: string[] = [];
   if (message.content) parts.push(message.content);
-  for (const embed of message.embeds) {
-    if (embed.title) parts.push(embed.title);
-    if (embed.description) parts.push(embed.description);
+  const collectEmbeds = (embeds: readonly { title?: string | null; description?: string | null; fields?: readonly { name: string; value: string }[] }[]) => {
+    for (const embed of embeds) {
+      if (embed.title) parts.push(embed.title);
+      if (embed.description) parts.push(embed.description);
+      for (const f of embed.fields ?? []) parts.push(`${f.name}\n${f.value}`);
+    }
+  };
+  collectEmbeds(message.embeds);
+  // Messages transférés : le texte est dans les snapshots, pas dans `content`.
+  for (const snap of message.messageSnapshots?.values() ?? []) {
+    if (snap.content) parts.push(snap.content);
+    collectEmbeds(snap.embeds ?? []);
   }
   return parts.join("\n\n").trim().slice(0, MAX_SOURCE_CHARS);
 }
@@ -95,14 +104,16 @@ async function removeReaction(reaction: MessageReaction, user: User) {
   }
 }
 
-async function sendPrivate(user: User, payload: { content?: string; embeds?: EmbedBuilder[] }) {
+async function sendPrivate(user: User, payload: { content?: string; embeds?: EmbedBuilder[] }): Promise<boolean> {
   try {
     await user.send(payload);
+    return true;
   } catch (err) {
     console.warn(
       `[dm] envoi impossible à ${user.tag} (MP fermés ?) :`,
       err instanceof Error ? err.message : err,
     );
+    return false;
   }
 }
 
@@ -117,20 +128,22 @@ async function handleReaction(rawReaction: MessageReaction | PartialMessageReact
   ]);
   const message = reaction.message.partial ? await reaction.message.fetch() : reaction.message;
 
-  // Retire le drapeau tout de suite : seul l'utilisateur voit le résultat, en privé.
-  const removal = removeReaction(reaction, user);
-
   if (onCooldown(user.id)) {
-    await removal;
+    await removeReaction(reaction, user);
     return;
   }
+
+  // Le drapeau n'est retiré qu'une fois le MP livré : si les MP sont fermés, il reste, signe que rien n'a été envoyé.
+  const deliver = async (payload: { content?: string; embeds?: EmbedBuilder[] }) => {
+    if (await sendPrivate(user, payload)) await removeReaction(reaction, user);
+  };
 
   const sourceUrl = message.url;
   const text = extractText(message);
   const targetName = languageName(target.language);
 
   if (!text) {
-    await Promise.all([removal, sendPrivate(user, { content: `${reaction.emoji.name} ${labels.empty}\n${sourceUrl}` })]);
+    await deliver({ content: `${reaction.emoji.name} ${labels.empty}\n${sourceUrl}` });
     return;
   }
 
@@ -144,9 +157,10 @@ async function handleReaction(rawReaction: MessageReaction | PartialMessageReact
       })
       .setTitle(`${reaction.emoji.name} ${labels.title(targetName)}`)
       .setDescription(
-        (sameLanguage(result.detectedLanguage, target.language)
-          ? `*${labels.sameLang(targetName)}*\n\n`
-          : "") + result.text.slice(0, EMBED_DESCRIPTION_MAX),
+        (
+          (sameLanguage(result.detectedLanguage, target.language) ? `*${labels.sameLang(targetName)}*\n\n` : "") +
+          result.text
+        ).slice(0, EMBED_DESCRIPTION_MAX),
       )
       .addFields({ name: labels.open, value: `[→](${sourceUrl})`, inline: true })
       .setFooter({
@@ -157,10 +171,10 @@ async function handleReaction(rawReaction: MessageReaction | PartialMessageReact
           .filter(Boolean)
           .join(" • "),
       });
-    await Promise.all([removal, sendPrivate(user, { embeds: [embed] })]);
+    await deliver({ embeds: [embed] });
   } catch (err) {
     console.error("[translate]", err instanceof Error ? err.message : err);
-    await Promise.all([removal, sendPrivate(user, { content: `${reaction.emoji.name} ${labels.failed}\n${sourceUrl}` })]);
+    await deliver({ content: `${reaction.emoji.name} ${labels.failed}\n${sourceUrl}` });
   }
 }
 
